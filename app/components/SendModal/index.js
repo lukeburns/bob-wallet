@@ -13,6 +13,14 @@ import { clientStub as aClientStub } from '../../background/analytics/client';
 import walletClient from '../../utils/walletClient';
 import { shell } from 'electron';
 import {I18nContext} from "../../utils/i18n";
+import hip2 from "../../utils/hip2Client";
+
+const networkPorts = {
+  'main': 5350,
+  'testnet': 15350,
+  'regtest': 25350,
+  'simnet': 35350
+}
 
 const analytics = aClientStub(() => require('electron').ipcRenderer);
 
@@ -26,6 +34,7 @@ const FAST = 'Fast';
     fees: state.node.fees,
     spendableBalance: state.wallet.balance.spendable,
     network: state.wallet.network,
+    noDns: state.node.noDns,
     explorer: state.node.explorer,
   }),
   dispatch => ({
@@ -54,24 +63,65 @@ class SendModal extends Component {
       transactionHash: '',
       isSending: false,
       to: '',
+      hip2Input: false,
+      hip2To: '',
+      hip2Error: '',
+      hip2Success: '',
       amount: '',
       errorMessage: '',
       addressError: false,
       feeAmount: 0,
       txSize: 0,
     };
+    console.log(`HIP-2 Resolver: 127.0.0.1:${networkPorts[props.network]}`)
+    hip2.setServers([`127.0.0.1:${networkPorts[props.network]}`])
   }
 
   componentDidMount() {
     analytics.screenView('Send');
   }
 
-  updateToAddress = e => {
-    this.setState({to: e.target.value, errorMessage: ''});
-    if (e.target.value.length > 2 && !isValidAddress(e.target.value, this.props.network)) {
-      this.setState({errorMessage: this.context.t('invalidAddressPrefix')});
+  updateToAddress = async e => {
+    const dnsEnabled = !this.props.noDns
+    let input = e.target.value
+
+    if (dnsEnabled && !this.state.hip2Input && input[0] === '@') {
+      this.setState({ hip2Input: true, to: '', errorMessage: '', hip2Success: '', hip2Error: '' })
+      input = input.slice(1)
+    }
+
+    if (this.state.hip2Input) {
+      // clear `to` address on new input
+      this.setState({ to: '', hip2To: input, errorMessage: '', hip2Success: '' })
+      if (input) {
+        hip2.fetchAddress(input, 'HNS').then(to => {
+          // only set `to` address if matches the current input
+          if (this.state.hip2Input && this.state.hip2To === input) {
+            this.setState({ to, errorMessage: '', hip2Success: to, hip2Error: '' })
+          }
+        }).catch(err => {
+          if (this.state.hip2Input && this.state.hip2To === input) {
+            this.setState({ to: '', errorMessage: '', hip2Success: '', hip2Error: this.context.t('noHip2AddressFound') })
+          }
+        })
+      }
+    } else {
+      this.setState({ to: input, errorMessage: '', hip2Success: '', hip2Error: '' });
+    }
+
+    const address = this.state.to
+    if (address.length > 2 && !isValidAddress(address, this.props.network)) {
+      this.setState({ errorMessage: this.context.t('invalidAddressPrefix') });
     }
   };
+
+  updateHip2 = e => {
+    if (this.state.hip2Input) {
+      if (e.key === 'Escape' || (e.key === 'Backspace' && this.state.hip2To.length === 0)) {
+        this.setState({ hip2Input: false, hip2To: '', hip2Success: '', hip2Error: '', to: '', errorMessage: '' })
+      }
+    }
+  }
 
   updateAmount = e => this.setState({amount: e.target.value, errorMessage: ''});
 
@@ -178,7 +228,7 @@ class SendModal extends Component {
   }
 
   renderSend() {
-    const {selectedGasOption, amount, to} = this.state;
+    const {selectedGasOption, amount, to, hip2Input, hip2To, hip2Success, hip2Error} = this.state;
     const {t} = this.context;
     const {isValid} = this.validate();
 
@@ -192,13 +242,17 @@ class SendModal extends Component {
           <div className="send__to">
             <div className="send__label">{t('sendToLabel')}</div>
             <div className="send__input" key="send-input">
+              {hip2Input && <span className="send__input-prefix">@</span>}
               <input
                 type="text"
-                placeholder={t('recipientAddress')}
+                placeholder={hip2Input ? t('recipientHip2Address') : t('recipientAddress')}
                 onChange={this.updateToAddress}
-                value={to}
+                onKeyDown={this.updateHip2}
+                value={hip2Input ? hip2To : to}
               />
             </div>
+            <Alert type="error" style={{ margin: '1em 0 0 0' }} message={hip2Error} />
+            <Alert type="success" style={{ margin: '1em 0 0 0' }} message={hip2Success ? `🔒 ${hip2Success}` : ``} />
           </div>
           <div className="send__amount">
             <div className="send__label">{t('amount')}</div>
