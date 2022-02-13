@@ -257,7 +257,7 @@ class SendModal extends Component {
               ) : '@'}</span>}
               <input
                 type="text"
-                className={hip2Input && (to ? 'send__input-hip2-success' : 'send__input-hip2')}
+                className={hip2Input ? (to ? 'send__input-hip2-success' : 'send__input-hip2') : null}
                 placeholder={hip2Input ? t('recipientHip2Address') : t('recipientAddress')}
                 onChange={this.updateToAddress}
                 onKeyDown={this.updateHip2}
